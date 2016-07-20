@@ -1,3 +1,5 @@
+#include <ArduinoJson.h>
+
 #include <SparkFunTSL2561.h>
 #include <Wire.h>
 #include <Dht11.h>
@@ -22,18 +24,22 @@ void setup() {
 }
 
 void loop() {
-  int temp = 0;
+  int tempF = 0;
+  double tempC = 0;
   int humidity = 0;
       switch (dht.read()) {
     case Dht11::OK:
         Serial.print("Humidity (%): ");
-        Serial.println(dht.getHumidity());
+        humidity = dht.getHumidity();
+        Serial.println(humidity);
 
         Serial.print("Temperature (C): ");
-        Serial.println(dht.getTemperature());
+        tempC = dht.getTemperature();
+        Serial.println(tempC);
 
         Serial.print("Temperature (F): ");
-        Serial.println(dht.getTemperature() * 1.8 + 32);
+        tempF = dht.getTemperature() * 1.8 + 32;
+        Serial.println(tempF);
         break;
 
     case Dht11::ERROR_CHECKSUM:
@@ -50,6 +56,8 @@ void loop() {
     }
 
   unsigned int data0, data1;
+  double lux;    // Resulting lux value
+
   if (light.getData(data0,data1))
   {
     // getData() returned true, communication was successful
@@ -59,7 +67,6 @@ void loop() {
     Serial.print(" data1: ");
     Serial.print(data1);
 
-    double lux;    // Resulting lux value
     boolean good;  // True if neither sensor is saturated
     
     // Perform lux calculation:
@@ -82,6 +89,14 @@ void loop() {
 
   Serial.print("Analog soil read: ");
   Serial.println(analogRead(A0));
+
+  StaticJsonBuffer<200> jsonBuffer;
+  JsonObject& root = jsonBuffer.createObject();
+  root["tempF"] = tempF;
+  root["tempC"] = tempC;
+  root["lux"] = lux;
+  root["moisture"] = analogRead(A0);
+  root.prettyPrintTo(Serial);
   
   delay(1000);
 }
