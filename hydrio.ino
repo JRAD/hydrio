@@ -1,8 +1,17 @@
+#include <ESP8266WiFi.h>
+#include <aREST.h>
 #include <ArduinoJson.h>
-
 #include <SparkFunTSL2561.h>
 #include <Wire.h>
 #include <Dht11.h>
+
+aREST rest = aREST();
+
+const char* ssid = "ssid";
+const char* password = "password";
+
+#define LISTEN_PORT 80
+WiFiServer server(LISTEN_PORT);
 
 SFE_TSL2561 light;
 boolean gain;     // Gain setting, 0 = X1, 1 = X16;
@@ -10,6 +19,11 @@ unsigned int ms;  // Integration ("shutter") time in milliseconds
 
 int pin = 2;
 Dht11 dht(pin);
+
+int tempF;
+float tempC;
+int humidity;
+double lux;
 
 void setup() {
   // put your setup code here, to run once:
@@ -20,13 +34,35 @@ void setup() {
   unsigned char time = 2;
   light.setTiming(gain, time, ms);
   light.setPowerUp();
+  tempF = 0;
+  tempC = 0;
+  humidity = 0;
+  rest.variable("tempF",&tempF);
+  rest.variable("tempC",&tempC);
+  rest.variable("humudity",&humidity);
+  rest.variable("lux",&lux);
+
+  rest.set_id("1");
+  rest.set_name("derp");
+
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("");
+  Serial.println("WiFi connected");
+
+  server.begin();
+  Serial.println("Server started");
+  Serial.println(WiFi.localIP());
+  
+  
 
 }
 
 void loop() {
-  int tempF = 0;
-  double tempC = 0;
-  int humidity = 0;
+
       switch (dht.read()) {
     case Dht11::OK:
         Serial.print("Humidity (%): ");
@@ -56,7 +92,6 @@ void loop() {
     }
 
   unsigned int data0, data1;
-  double lux;    // Resulting lux value
 
   if (light.getData(data0,data1))
   {
@@ -75,8 +110,8 @@ void loop() {
     
     // Print out the results:
   
-    Serial.print(" lux: ");
-    Serial.print(lux);
+    //Serial.print(" lux: ");
+    //Serial.print(lux);
     if (good) Serial.println(" (good)"); else Serial.println(" (BAD)");
   }
   else
@@ -87,8 +122,8 @@ void loop() {
     printError(error);
   }
 
-  Serial.print("Analog soil read: ");
-  Serial.println(analogRead(A0));
+  //Serial.print("Analog soil read: ");
+  //Serial.println(analogRead(A0));
 
   StaticJsonBuffer<200> jsonBuffer;
   JsonObject& root = jsonBuffer.createObject();
@@ -96,8 +131,17 @@ void loop() {
   root["tempC"] = tempC;
   root["lux"] = lux;
   root["moisture"] = analogRead(A0);
-  root.prettyPrintTo(Serial);
-  
+  //root.prettyPrintTo(Serial);
+
+    // Handle REST calls
+  WiFiClient client = server.available();
+  if (!client) {
+    return;
+  }
+  while(!client.available()){
+    delay(1);
+  }
+  rest.handle(client);
   delay(1000);
 }
 
