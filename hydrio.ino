@@ -1,6 +1,5 @@
 #include <ESP8266WiFi.h>
 #include <aREST.h>
-#include <ArduinoJson.h>
 #include <SparkFunTSL2561.h>
 #include <Wire.h>
 #include <Dht11.h>
@@ -24,6 +23,7 @@ int tempF;
 float tempC;
 int humidity;
 double lux;
+String luxValue;
 
 void setup() {
   // put your setup code here, to run once:
@@ -40,7 +40,7 @@ void setup() {
   rest.variable("tempF",&tempF);
   rest.variable("tempC",&tempC);
   rest.variable("humudity",&humidity);
-  rest.variable("lux",&lux);
+  rest.variable("lux",&luxValue);
 
   rest.set_id("1");
   rest.set_name("derp");
@@ -112,7 +112,15 @@ void loop() {
   
     //Serial.print(" lux: ");
     //Serial.print(lux);
-    if (good) Serial.println(" (good)"); else Serial.println(" (BAD)");
+    if (good)
+    {
+      Serial.println(" (good)");
+      luxValue = String(lux);
+    }
+    else
+    {
+      Serial.println(" (BAD)");
+    }
   }
   else
   {
@@ -124,14 +132,6 @@ void loop() {
 
   //Serial.print("Analog soil read: ");
   //Serial.println(analogRead(A0));
-
-  StaticJsonBuffer<200> jsonBuffer;
-  JsonObject& root = jsonBuffer.createObject();
-  root["tempF"] = tempF;
-  root["tempC"] = tempC;
-  root["lux"] = lux;
-  root["moisture"] = analogRead(A0);
-  //root.prettyPrintTo(Serial);
 
     // Handle REST calls
   WiFiClient client = server.available();
