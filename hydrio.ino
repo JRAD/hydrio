@@ -1,16 +1,17 @@
+#include <ESP8266HTTPClient.h>
 #include <ESP8266WiFi.h>
-#include <aREST.h>
 #include <SparkFunTSL2561.h>
 #include <Wire.h>
 #include <Dht11.h>
+#include <WiFiUdp.h>
+#include <NTPClient.h>
+#include "Settings.h"
 
-aREST rest = aREST();
-
-const char* ssid = "ssid";
-const char* password = "password";
-
-#define LISTEN_PORT 80
-WiFiServer server(LISTEN_PORT);
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, NTP_ADDRESS, NTP_OFFSET, NTP_INTERVAL);
+HTTPClient http;
+String ipAddr = "";
+String macAddr = "";
 
 SFE_TSL2561 light;
 boolean gain;     // Gain setting, 0 = X1, 1 = X16;
@@ -25,26 +26,26 @@ int humidity;
 double lux;
 String luxValue;
 
+unsigned long lastReportTime = 0;
+unsigned long lastPollTime = 0;
+unsigned long lastErrorTime = 0;
+unsigned long startTime = 0;
+unsigned long epochTime = 0;
+
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(9600);
   Wire.begin(4,5);
   light.begin();
-  gain = 1;
+  gain =0;
   unsigned char time = 2;
   light.setTiming(gain, time, ms);
   light.setPowerUp();
   tempF = 0;
   tempC = 0;
   humidity = 0;
-  rest.variable("tempF",&tempF);
-  rest.variable("tempC",&tempC);
-  rest.variable("humudity",&humidity);
-  rest.variable("lux",&luxValue);
 
-  rest.set_id("1");
-  rest.set_name("derp");
-
+  //wifi
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
@@ -52,97 +53,98 @@ void setup() {
   }
   Serial.println("");
   Serial.println("WiFi connected");
-
-  server.begin();
-  Serial.println("Server started");
+  Serial.print("local_ip: ");
   Serial.println(WiFi.localIP());
-  
-  
+  ipAddr = String(WiFi.localIP()[0]) + "." + String(WiFi.localIP()[1]) + "." + String(WiFi.localIP()[2]) + "." + String(WiFi.localIP()[3]);
+  macAddr = WiFi.macAddress();
+  Serial.print("mac: ");
+  Serial.println(macAddr);
 
+  //NTP
+  timeClient.begin();
+  timeClient.update();
+  epochTime = timeClient.getEpochTime();
+  Serial.println("NTP: " + timeClient.getFormattedTime() + " (" + String(epochTime) + ")");
+  startTime = epochTime;
 }
 
 void loop() {
+  // ntp
+  timeClient.update();
+  epochTime = timeClient.getEpochTime();
+  //poll sensors
+  if (epochTime - lastPollTime >= POLL_FREQ_SECONDS) {
 
       switch (dht.read()) {
-    case Dht11::OK:
-        Serial.print("Humidity (%): ");
-        humidity = dht.getHumidity();
-        Serial.println(humidity);
-
-        Serial.print("Temperature (C): ");
-        tempC = dht.getTemperature();
-        Serial.println(tempC);
-
-        Serial.print("Temperature (F): ");
-        tempF = dht.getTemperature() * 1.8 + 32;
-        Serial.println(tempF);
-        break;
-
-    case Dht11::ERROR_CHECKSUM:
-        Serial.println("Checksum error");
-        break;
-
-    case Dht11::ERROR_TIMEOUT:
-        Serial.println("Timeout error");
-        break;
-
-    default:
-        Serial.println("Unknown error");
-        break;
+        case Dht11::OK:
+            Serial.print("Humidity (%): ");
+            humidity = dht.getHumidity();
+            Serial.println(humidity);
+    
+            Serial.print("Temperature (C): ");
+            tempC = dht.getTemperature();
+            Serial.println(tempC);
+    
+            Serial.print("Temperature (F): ");
+            tempF = dht.getTemperature() * 1.8 + 32;
+            Serial.println(tempF);
+            break;
+    
+        case Dht11::ERROR_CHECKSUM:
+            Serial.println("Checksum error");
+            break;
+    
+        case Dht11::ERROR_TIMEOUT:
+            Serial.println("Timeout error");
+            break;
+    
+        default:
+            Serial.println("Unknown error");
+            break;
     }
 
-  unsigned int data0, data1;
-
-  if (light.getData(data0,data1))
-  {
-    // getData() returned true, communication was successful
-    
-    Serial.print("data0: ");
-    Serial.print(data0);
-    Serial.print(" data1: ");
-    Serial.print(data1);
-
-    boolean good;  // True if neither sensor is saturated
-    
-    // Perform lux calculation:
-
-    good = light.getLux(gain,ms,data0,data1,lux);
-    
-    // Print out the results:
+    unsigned int data0, data1;
   
-    //Serial.print(" lux: ");
-    //Serial.print(lux);
-    if (good)
+    if (light.getData(data0,data1))
     {
-      Serial.println(" (good)");
-      luxValue = String(lux);
+      // getData() returned true, communication was successful
+      
+      Serial.print("data0: ");
+      Serial.print(data0);
+      Serial.print(" data1: ");
+      Serial.print(data1);
+  
+      boolean good;  // True if neither sensor is saturated
+      
+      // Perform lux calculation:
+  
+      good = light.getLux(gain,ms,data0,data1,lux);
+      
+      // Print out the results:
+    
+      //Serial.print(" lux: ");
+      //Serial.print(lux);
+      if (good)
+      {
+        Serial.print(" lux: ");
+        Serial.print(lux);
+        Serial.println(" (good)");
+      }
+      else
+      {
+        Serial.println(" (BAD)");
+      }
     }
     else
     {
-      Serial.println(" (BAD)");
+      // getData() returned false because of an I2C error, inform the user.
+  
+      byte error = light.getError();
+      printError(error);
     }
-  }
-  else
-  {
-    // getData() returned false because of an I2C error, inform the user.
 
-    byte error = light.getError();
-    printError(error);
+    lastPollTime = epochTime;
   }
-
-  //Serial.print("Analog soil read: ");
-  //Serial.println(analogRead(A0));
-
-    // Handle REST calls
-  WiFiClient client = server.available();
-  if (!client) {
-    return;
-  }
-  while(!client.available()){
-    delay(1);
-  }
-  rest.handle(client);
-  delay(1000);
 }
 
 void printError(byte error)
@@ -173,4 +175,18 @@ void printError(byte error)
     default:
       Serial.println("unknown error");
   }
+}
+
+void report() {
+    Serial.print("IDB_R = ");
+    http.begin(influxDbUrl);
+    http.setAuthorization(influxAuth);
+
+    String strEpoch = String(epochTime) + "000000000";
+    String payload = "tempC,location=" + location + ",node=" + node + " value=" + tempC + " " + strEpoch + "\n";
+    payload += "tempF,location=" + location + ",node=" + node + " value=" + tempF + " " + strEpoch;
+
+    int httpCode = http.POST(payload);
+    http.end();
+    Serial.println(String(httpCode) + ":" + epochTime);
 }
